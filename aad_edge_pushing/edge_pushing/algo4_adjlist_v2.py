@@ -1,0 +1,287 @@
+"""
+Algorithm 4 (Edge-Pushing) with Cython V2 optimized adjacency list.
+
+This version uses SymmSparseAdjListV2 which has better Cython optimizations
+over the original version.
+"""
+
+import numpy as np
+from typing import List, Dict, Tuple, Any
+from ..aad.core.tape import global_tape, Tape
+from ..aad.core.var import ADVar
+from ..aad.core.node import Node
+
+# Try to import V2, fallback to original if not available
+try:
+    from .symm_sparse_adjlist_v2 import SymmSparseAdjListV2 as SymmSparseAdjList
+    print("Using Cython V2 optimized version")
+except ImportError:
+    print("Warning: Cython V2 not available, falling back to original")
+    from .symm_sparse_adjlist import SymmSparseAdjList
+
+
+def algo4_adjlist_v2(output: ADVar, inputs: List[ADVar]) -> np.ndarray:
+    """
+    Compute Hessian using Algorithm 4 with Cython V2 optimization.
+
+    This version uses SymmSparseAdjListV2 which has:
+    - Better type declarations
+    - Optimized inline functions
+    - Reduced Python overhead
+
+    Args:
+        output: Output ADVar (scalar function output)
+        inputs: List of input ADVars
+
+    Returns:
+        Dense Hessian matrix of shape (n_inputs, n_inputs)
+    """
+    mapping = _create_index_mapping(global_tape, inputs, output)
+    var_to_idx = mapping['var_to_idx']
+    idx_to_var = mapping['idx_to_var']
+    input_indices = mapping['input_indices']
+    output_idx = mapping['output_idx']
+    n_nodes = mapping['n_nodes']
+
+    # Initialize W matrix and adjoint vector
+    W = SymmSparseAdjList(n_nodes)  # ← Uses Cython V2 optimized version!
+    vbar = [0.0] * n_nodes
+    vbar[output_idx] = 1.0  # Seed adjoint for output
+
+    # Reverse sweep through nodes
+    for node in reversed(global_tape.nodes):
+        i = var_to_idx[id(node.out)]
+
+        # Get predecessors and derivatives
+        preds = _get_predecessors(node, var_to_idx)
+        preds = sorted(set(preds))  # Remove duplicates
+        d1 = _get_first_derivatives(node, var_to_idx)
+        d2 = _compute_second_derivatives(node, var_to_idx)
+
+        # PUSHING STAGE: Edge-pushing (OPTIMIZED with Cython V2!)
+        _pushing_stage_adjlist(W, i, preds, d1)
+
+        # CREATING STAGE: Add second-order local derivatives
+        if vbar[i] != 0:
+            _creating_stage(W, preds, d2, vbar[i])
+
+            # ADJOINT STAGE: v̄ᵀ ← v̄ᵀ Φ'ᵢ
+            _adjoint_update(vbar, i, preds, d1)
+
+    return _extract_input_hessian(W, input_indices)
+
+
+def _pushing_stage_adjlist(W: SymmSparseAdjList, i: int, preds: List[int],
+                            d1: Dict[int, float]) -> None:
+    """
+    OPTIMIZED pushing stage using Cython V2 adjacency list.
+
+    KEY OPTIMIZATION:
+    - O(degree(i)) neighbor lookup instead of O(n)
+    - Cython-optimized iterations
+    - Reduced Python overhead
+
+    Args:
+        W: Cython V2 optimized sparse matrix
+        i: Current node index
+        preds: List of predecessor indices (deduplicated)
+        d1: First-order derivatives ∂φᵢ/∂xⱼ
+    """
+    # ✨ O(degree(i)) with Cython V2 optimization
+    neighbors = W.get_neighbors(i)
+
+    # Process each neighbor
+    for p, w_pi in neighbors:
+        if p == i:
+            # Case 1: Diagonal W(i,i) contribution
+            for a, j in enumerate(preds):
+                dj = d1.get(j, 0.0)
+                if dj == 0.0:
+                    continue
+                for b in range(a, len(preds)):
+                    k = preds[b]
+                    dk = d1.get(k, 0.0)
+                    if dk != 0.0:
+                        W.add(j, k, dj * dk * w_pi)
+        else:
+            # Case 2: Off-diagonal W(p,i) contribution
+            for j in preds:
+                dj = d1.get(j, 0.0)
+                if dj == 0.0:
+                    continue
+
+                if j == p:
+                    # Special case: j = p → diagonal update
+                    W.add(p, p, 2.0 * dj * w_pi)
+                else:
+                    # General case: j ≠ p → off-diagonal update
+                    W.add(p, j, dj * w_pi)
+
+    # Clear row/column i to avoid reuse
+    W.clear_row_col(i)
+
+
+def _creating_stage(W: SymmSparseAdjList, preds: List[int],
+                    d2: Dict[Tuple[int, int], float], vbar: float) -> None:
+    """
+    Creating stage: W += v̄ᵢ * Φ''ᵢ
+    """
+    if vbar == 0.0:
+        return
+
+    for (j, k), val in d2.items():
+        if k < j:
+            continue  # Only fill upper triangle
+        if val != 0.0:
+            W.add(j, k, vbar * val)
+
+
+# ============================================================================
+# Shared helper functions (same as algo4_adjlist.py)
+# ============================================================================
+
+def _create_index_mapping(tape: Tape, inputs: List[ADVar], output: ADVar) -> Dict[str, Any]:
+    """Create bidirectional mapping between ADVar objects and integer indices."""
+    var_to_idx = {}
+    var_to_var = {}
+    idx = 0
+
+    # Map inputs first
+    input_indices = []
+    for inp in inputs:
+        var_to_idx[id(inp)] = idx
+        var_to_var[idx] = inp
+        input_indices.append(idx)
+        idx += 1
+
+    # Map output and all intermediate nodes
+    for node in tape.nodes:
+        if id(node.out) not in var_to_idx:
+            var_to_idx[id(node.out)] = idx
+            var_to_var[idx] = node.out
+            idx += 1
+        # Map parents
+        for parent, _ in node.parents:
+            if id(parent) not in var_to_idx:
+                var_to_idx[id(parent)] = idx
+                var_to_var[idx] = parent
+                idx += 1
+
+    # Make sure output is in the mapping
+    if id(output) not in var_to_idx:
+        var_to_idx[id(output)] = idx
+        var_to_var[idx] = output
+        idx += 1
+
+    output_idx = var_to_idx[id(output)]
+
+    return {
+        'var_to_idx': var_to_idx,
+        'idx_to_var': var_to_var,
+        'input_indices': input_indices,
+        'output_idx': output_idx,
+        'n_nodes': idx
+    }
+
+
+def _get_predecessors(node: Node, var_to_idx: Dict[int, int]) -> List[int]:
+    """Get predecessor indices for a given node."""
+    preds = []
+    for parent, _ in node.parents:
+        preds.append(var_to_idx[id(parent)])
+    return preds
+
+
+def _get_first_derivatives(node: Node, var_to_idx: Dict[int, int]) -> Dict[int, float]:
+    """Extract first-order local derivatives, summing repeated variables."""
+    d1 = {}
+    for parent, deriv in node.parents:
+        j = var_to_idx[id(parent)]
+        d1[j] = d1.get(j, 0.0) + float(deriv)
+    return d1
+
+
+def _compute_second_derivatives(node: Node, var_to_idx: Dict[int, int]) -> Dict[Tuple[int, int], float]:
+    """Compute second-order local derivatives for a node."""
+    d2 = {}
+
+    if node.op_tag == 'mul' and len(node.parents) == 2:
+        parent0, parent1 = node.parents[0][0], node.parents[1][0]
+        idx0, idx1 = var_to_idx.get(id(parent0), -1), var_to_idx.get(id(parent1), -1)
+
+        if idx0 >= 0 and idx1 >= 0:
+            if idx0 == idx1:
+                d2[(idx0, idx0)] = 2.0
+            else:
+                d2[(min(idx0, idx1), max(idx0, idx1))] = 1.0
+
+    elif node.op_tag in ('add', 'sub'):
+        pass
+
+    elif node.op_tag == 'div' and len(node.parents) == 2:
+        parent0, parent1 = node.parents[0][0], node.parents[1][0]
+        idx0, idx1 = var_to_idx.get(id(parent0), -1), var_to_idx.get(id(parent1), -1)
+
+        if idx0 >= 0 and idx1 >= 0:
+            y_val = getattr(parent1, 'val', 1.0)
+            if y_val != 0:
+                if idx0 != idx1:
+                    d2[(min(idx0, idx1), max(idx0, idx1))] = -1.0 / (y_val * y_val)
+                x_val = getattr(parent0, 'val', 1.0)
+                d2[(idx1, idx1)] = 2.0 * x_val / (y_val ** 3)
+
+    elif node.op_tag == 'pow' and len(node.parents) == 2:
+        parent0 = node.parents[0][0]
+        idx0 = var_to_idx.get(id(parent0), -1)
+        if idx0 >= 0:
+            x_val = getattr(parent0, 'val', 1.0)
+            n_val = getattr(node.parents[1][0], 'val', 2.0)
+            if x_val != 0:
+                d2[(idx0, idx0)] = n_val * (n_val - 1) * (x_val ** (n_val - 2))
+
+    elif node.op_tag == 'exp' and len(node.parents) == 1:
+        parent0 = node.parents[0][0]
+        idx0 = var_to_idx.get(id(parent0), -1)
+        if idx0 >= 0:
+            x_val = getattr(parent0, 'val', 0.0)
+            d2[(idx0, idx0)] = np.exp(x_val)
+
+    elif node.op_tag == 'log' and len(node.parents) == 1:
+        parent0 = node.parents[0][0]
+        idx0 = var_to_idx.get(id(parent0), -1)
+        if idx0 >= 0:
+            x_val = getattr(parent0, 'val', 1.0)
+            if x_val > 0:
+                d2[(idx0, idx0)] = -1.0 / (x_val * x_val)
+
+    elif node.op_tag == 'erf' and len(node.parents) == 1:
+        parent0 = node.parents[0][0]
+        idx0 = var_to_idx.get(id(parent0), -1)
+        if idx0 >= 0:
+            x_val = getattr(parent0, 'val', 0.0)
+            d2[(idx0, idx0)] = -(4.0 * x_val / np.sqrt(np.pi)) * np.exp(-x_val * x_val)
+
+    return d2
+
+def _adjoint_update(vbar: List[float], i: int, preds: List[int],
+                    d1: Dict[int, float]) -> None:
+    """Adjoint update: v̄ᵀ ← v̄ᵀ Φ'ᵢ"""
+    if vbar[i] == 0.0:
+        return
+    for j in preds:
+        vbar[j] += vbar[i] * d1.get(j, 0.0)
+
+
+def _extract_input_hessian(W: SymmSparseAdjList, input_indices: List[int]) -> np.ndarray:
+    """Extract submatrix of W corresponding to input variables."""
+    n = len(input_indices)
+    H = np.zeros((n, n))
+
+    for i, idx_i in enumerate(input_indices):
+        for j, idx_j in enumerate(input_indices):
+            if j < i:
+                continue
+            H[i, j] = W.get(idx_i, idx_j)
+            if i != j:
+                H[j, i] = H[i, j]
+    return H
