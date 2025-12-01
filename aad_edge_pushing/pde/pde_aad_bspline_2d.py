@@ -484,8 +484,6 @@ class BS_PDE_AAD_BSpline2D:
                 - sparsity_info: Sparsity statistics
                 - computation_time_ms: Wall-clock time
         """
-        from aad_edge_pushing.edge_pushing.algo4_cython_simple import algo4_cython_simple
-
         t_start = time.perf_counter()
         global_tape.reset()
 
