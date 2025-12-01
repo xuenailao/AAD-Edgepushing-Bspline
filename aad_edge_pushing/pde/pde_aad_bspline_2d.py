@@ -105,6 +105,37 @@ class BS_PDE_AAD_BSpline2D:
         # Crank-Nicolson parameter
         self.phi = 0.5
 
+        # Cache for active parameters (computed lazily)
+        self._active_params_cache = None
+
+    def get_active_parameters(self) -> set:
+        """
+        Get the set of active parameter indices (i, j) that contribute to the price.
+
+        Due to B-spline compact support, only parameters whose basis functions
+        are non-zero at some point in the PDE grid will affect the price.
+
+        Returns:
+            Set of (i, j) tuples for active parameters
+        """
+        if self._active_params_cache is not None:
+            return self._active_params_cache
+
+        n_S, n_T = self.bspline_model_2d.coefficients.shape
+        active_params = set()
+
+        # Check all interior grid points at all time steps
+        for S in self.S_grid[1:-1]:
+            for t in self.t_grid[1:]:
+                idx_S, idx_T = self.bspline_model_2d.get_active_basis_indices(S, t)
+                for i in idx_S:
+                    for j in idx_T:
+                        if i < n_S and j < n_T:
+                            active_params.add((i, j))
+
+        self._active_params_cache = active_params
+        return active_params
+
     def _terminal_condition(self) -> np.ndarray:
         """Terminal payoff: max(S - K, 0) for European call."""
         return np.maximum(self.S_grid - self.K, 0.0)
@@ -467,14 +498,20 @@ class BS_PDE_AAD_BSpline2D:
         n_S, n_T = coeff_matrix_vals.shape
         n_params = n_S * n_T
 
+        # Get active parameters for sparse optimization
+        active_params = self.get_active_parameters()
+        n_active = len(active_params)
+
         # Create ADVars for all 2D B-spline coefficients
+        # Only active parameters get requires_grad=True (sparse optimization)
         coeff_matrix_advars = np.empty((n_S, n_T), dtype=object)
         coeff_advars_flat = []  # For edge-pushing (flattened list)
 
         for i in range(n_S):
             for j in range(n_T):
                 k = i * n_T + j  # Flat index
-                advar = ADVar(coeff_matrix_vals[i, j], requires_grad=True,
+                is_active = (i, j) in active_params
+                advar = ADVar(coeff_matrix_vals[i, j], requires_grad=is_active,
                              name=f"w{i},{j}")
                 coeff_matrix_advars[i, j] = advar
                 coeff_advars_flat.append(advar)
@@ -486,6 +523,7 @@ class BS_PDE_AAD_BSpline2D:
 
         if verbose:
             print(f"  PDE Grid: M={self.M}, N={N}")
+            print(f"  Active parameters: {n_active}/{n_params} ({100*n_active/n_params:.1f}%)")
             print(f"  2D B-spline: {n_S}×{n_T} = {n_params} coefficients")
             print(f"  Degrees: (S={self.bspline_model_2d.degree_S}, "
                   f"T={self.bspline_model_2d.degree_T})")
