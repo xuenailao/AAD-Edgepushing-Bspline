@@ -584,11 +584,14 @@ class BS_PDE_AAD_BSpline2D:
         # Extract price
         price = price_var.val
 
-        # Compute Hessian using edge-pushing
-        if verbose:
-            print(f"  Computing Hessian via edge-pushing (algo4)...")
-
-        hessian = algo4_cython_simple(price_var, coeff_advars_flat)
+        # Compute Hessian using edge-pushing (only if requested)
+        if compute_hessian:
+            if verbose:
+                print(f"  Computing Hessian via edge-pushing (algo4)...")
+            from aad_edge_pushing.edge_pushing.algo4_cython_simple import algo4_cython_simple
+            hessian = algo4_cython_simple(price_var, coeff_advars_flat)
+        else:
+            hessian = np.zeros((n_params, n_params))
 
         # Compute gradient (Jacobian)
         for var in coeff_advars_flat:
