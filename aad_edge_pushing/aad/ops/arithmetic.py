@@ -47,7 +47,7 @@ def _binary(x, y, f, dfdx, dfdy, tag):
 def add(x, y): return _binary(x, y, lambda a,b:a+b, lambda a,b:1.0,        lambda a,b:1.0,        "add")
 def sub(x, y): return _binary(x, y, lambda a,b:a-b, lambda a,b:1.0,        lambda a,b:-1.0,       "sub")
 def mul(x, y): return _binary(x, y, lambda a,b:a*b, lambda a,b:b,          lambda a,b:a,          "mul")
-def div(x, y): return _binary(x, y, lambda a,b:a/b, lambda a,b:1.0/b,      lambda a,b:-a/(b*b),   "div")
+def div(x, y): return _binary(x, y, lambda a,b:a/b, lambda a,b:1.0/b,      lambda a,b:-a/np.square(b),   "div")
 
 def neg(x):
     """

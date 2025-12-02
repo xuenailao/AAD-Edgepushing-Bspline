@@ -108,14 +108,18 @@ class BSplineModel2D:
         self.k_T = len(self.interior_knots_T)
 
         # Expected coefficient matrix shape
-        expected_n_S = self.k_S + self.degree_S + 1
-        expected_n_T = self.k_T + self.degree_T + 1
+        # For clamped B-spline: n_basis = degree + n_interior_knots - 1
+        # Knot vector: [0]*degree, interior_knots, [1]*degree
+        # len(knot_vector) = 2*degree + n_interior_knots
+        # n_basis = len(knot_vector) - degree - 1 = degree + n_interior_knots - 1
+        expected_n_S = self.degree_S + self.k_S - 1
+        expected_n_T = self.degree_T + self.k_T - 1
 
         if self.coefficients.shape != (expected_n_S, expected_n_T):
             raise ValueError(
                 f"Coefficient matrix shape {self.coefficients.shape} must be "
                 f"({expected_n_S}, {expected_n_T}) = "
-                f"(k_S+degree_S+1, k_T+degree_T+1)"
+                f"(degree_S+k_S-1, degree_T+k_T-1)"
             )
 
         # Boundaries for extrapolation
@@ -525,8 +529,9 @@ def create_flat_bspline_2d(config: BSplineConfig2D, volatility: float = 0.20) ->
     knots_S = np.linspace(config.S_min, config.S_max, config.n_knots_S)
     knots_T = np.linspace(config.T_min, config.T_max, config.n_knots_T)
 
-    n_S = config.n_knots_S + config.degree_S + 1
-    n_T = config.n_knots_T + config.degree_T + 1
+    # Correct formula: n_basis = degree + n_interior_knots - 1
+    n_S = config.degree_S + config.n_knots_S - 1
+    n_T = config.degree_T + config.n_knots_T - 1
 
     coefficients = np.full((n_S, n_T), volatility)
 
@@ -546,8 +551,8 @@ def create_separable_bspline_2d(config: BSplineConfig2D,
 
     Args:
         config: 2D B-spline configuration
-        vol_S: 1D volatility profile in space, shape (n_knots_S + degree_S + 1,)
-        vol_T: 1D volatility profile in time, shape (n_knots_T + degree_T + 1,)
+        vol_S: 1D volatility profile in space, shape (degree_S + n_knots_S - 1,)
+        vol_T: 1D volatility profile in time, shape (degree_T + n_knots_T - 1,)
 
     Returns:
         BSplineModel2D with separable structure

@@ -34,10 +34,13 @@ class ADVar:
                 f"but got {type(val)}"
             )
 
-        # Convert input to numeric form:
-        # - list/tuple/ndarray → numpy array
-        # - int/float → float
-        self.val = np.asarray(val) if isinstance(val, (list, tuple, np.ndarray)) else float(val)
+        # Convert input to numeric form with explicit float64 for precision:
+        # - list/tuple/ndarray → numpy float64 array
+        # - int/float → numpy float64 scalar
+        if isinstance(val, (list, tuple, np.ndarray)):
+            self.val = np.asarray(val, dtype=np.float64)
+        else:
+            self.val = np.float64(val)
 
         # Gradient accumulator (adjoint), initialized to zeros with same shape as val
         self.adj = np.zeros_like(self.val, dtype=float)
