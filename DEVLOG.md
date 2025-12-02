@@ -5,6 +5,24 @@
 
 ---
 
+## 2025-12-01 21:45
+
+### 改进内容
+- 修复 B-spline 系数公式 bug（`n = k + degree + 1` → `n = degree + k - 1`）
+- 应用数值精度优化（var.py 使用 np.float64，arithmetic.py 使用 np.square）
+- 验证稀疏 Edge-Pushing 优化（get_active_parameters + 条件 Hessian 计算）
+
+### 测试效果
+- EP vs BS 理论值差异从 3.15% 降至 0.077%
+- sigma(t=0) 和 sigma(t=1) 都正确返回 0.2
+- B-spline 形状 (6,6) 符合预期
+
+### 下一步计划
+- 运行完整 Hessian 测试验证 Edge-Pushing
+- 性能基准测试（稀疏 vs 全量）
+
+---
+
 ## 2025-12-01 17:30
 
 ### 改进内容
