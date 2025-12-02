@@ -5,6 +5,131 @@
 
 ---
 
+## 2025-12-02 05:30
+
+### 稀疏优化原理详解
+
+#### 1. 问题背景
+
+**原始 algo4 的瓶颈**：
+```
+PDE tape: ~11K nodes
+W 矩阵: 11K × 11K 的稠密操作
+但我们只需要: 16×16 的输入 Hessian
+```
+
+#### 2. 核心思想
+
+只追踪**与输入参数相关**的 W 矩阵条目：
+
+```
+原始: W[i,j] for all i,j ∈ {0, ..., 11K}
+稀疏: W[i,j] where i OR j 是输入或输入的"后代"
+```
+
+#### 3. 两个关键优化
+
+**优化 1: 找出"相关节点"** (`_find_relevant_nodes`)
+
+```python
+def _find_relevant_nodes(nodes, var_to_idx, input_indices):
+    relevant = set(input_indices)  # 输入节点一定相关
+
+    # 前向遍历：从输入向输出传播
+    for node in nodes:
+        for parent, _ in node.parents:
+            if parent_idx in relevant:
+                relevant.add(node_idx)  # 父节点相关 → 当前节点也相关
+                break
+
+    return relevant
+```
+
+**效果**：11K 节点 → ~3K 相关节点
+
+**优化 2: 稀疏 W 矩阵存储** (`SparseWMatrix`)
+
+```python
+class SparseWMatrix:
+    # 不存储 11K×11K 稠密矩阵
+    # 只存储有值的 (i,j) 对
+    _data: Dict[int, Dict[int, float]]  # W[i][j] = value
+```
+
+#### 4. 修改后的算法流程
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  原始 algo4                    │  稀疏 algo4            │
+├─────────────────────────────────────────────────────────┤
+│  for node in all_nodes:        │  for node in all_nodes:│
+│    pushing_stage(W, node)      │    if node in relevant:│
+│    creating_stage(W, node)     │      pushing(W, node)  │
+│    adjoint_stage(vbar, node)   │      creating(W, node) │
+│                                │      adjoint(vbar)     │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 5. Pushing Stage 优化
+
+**原始**：
+```python
+for all neighbors p of i:
+    for all predecessors j, k of i:
+        W[j,k] += d_j * d_k * W[p,i]
+```
+
+**稀疏**：
+```python
+for all neighbors p of i:
+    if p not in relevant: continue  # 跳过不相关
+    for all predecessors j, k of i:
+        if j not in relevant: continue
+        if k not in relevant: continue
+        W[j,k] += d_j * d_k * W[p,i]
+```
+
+#### 6. 性能对比
+
+| 阶段 | 原始 | 稀疏 | 说明 |
+|------|------|------|------|
+| 节点遍历 | 11K | 3K | 跳过不相关节点 |
+| W 条目 | O(n²) | O(稀疏) | 只存有值条目 |
+| Pushing | O(E×d²) | O(E_rel×d²) | E_rel << E |
+
+#### 7. 图示
+
+```
+输入层 (16个 w 系数)
+    ↓
+  [相关节点] ← 只追踪这些
+    ↓
+  [相关节点]
+    ↓
+  [不相关节点] ← 跳过！
+    ↓
+  [相关节点]
+    ↓
+输出 (price)
+```
+
+**结果**：60x 加速 (60s → 1s)，Hessian 完全一致 (diff < 1e-14)
+
+#### 8. 完整 Hessian 验证
+
+验证 EP 计算的完整 Hessian（不仅是对角线）与 Bumping2 匹配：
+
+| 指标 | 结果 |
+|------|------|
+| 最大绝对误差 | 6.85e-03 |
+| **最大相对误差** | **0.083%** |
+| 对角线误差 | < 0.02% |
+| 非对角误差 | < 0.1% |
+
+**结论**：EP 计算的完整 Hessian 与有限差分高度吻合
+
+---
+
 ## 2025-12-02 05:00
 
 ### 大规模测试：EP 优势随参数数量增长
