@@ -55,9 +55,6 @@ git add .claude/commands/*.md 2>/dev/null || true
 # 开发日志
 git add DEVLOG.md 2>/dev/null || true
 
-# 论文源文件（.tex）
-git add *.tex 2>/dev/null || true
-
 # 移除不应该跟踪的文件（如果之前误添加）
 git reset HEAD -- aad_edge_pushing/edge_pushing/test_*.py 2>/dev/null || true
 git reset HEAD -- aad_edge_pushing/edge_pushing/*.html 2>/dev/null || true
