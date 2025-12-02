@@ -5,6 +5,30 @@
 
 ---
 
+## 2025-12-02 04:30
+
+### 集成：algo4_sparse 到主 PDE 求解器
+
+**变更**：`pde_aad_bspline_2d.py` 中 `solve_pde_with_aad()` 现在使用 `algo4_sparse`
+
+**替换**：
+```python
+# 旧代码
+from algo4_cython_simple import algo4_cython_simple
+hessian = algo4_cython_simple(price_var, coeff_advars_flat)
+
+# 新代码
+from algo4_sparse import algo4_sparse
+hessian = algo4_sparse(price_var, coeff_advars_flat, sort_inputs=True)
+```
+
+**结果**：
+- 主求解器自动使用稀疏优化
+- 1.38s (16 params) vs 原来 ~60s
+- 与 Bumping2 对角线误差 < 0.02%
+
+---
+
 ## 2025-12-02 04:00
 
 ### 修复：EP vs Bumping2 对角线匹配问题
