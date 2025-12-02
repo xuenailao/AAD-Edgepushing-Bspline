@@ -587,14 +587,11 @@ class BS_PDE_AAD_BSpline2D:
         # Compute Hessian using edge-pushing (only if requested)
         if compute_hessian:
             if verbose:
-                print(f"  Computing Hessian via edge-pushing (algo4)...")
-            # Try Cython first, fallback to Pure Python
-            try:
-                from aad_edge_pushing.edge_pushing.algo4_cython_simple import algo4_cython_simple
-                hessian = algo4_cython_simple(price_var, coeff_advars_flat)
-            except ImportError:
-                from aad_edge_pushing.edge_pushing.algo4_adjlist import algo4_adjlist
-                hessian = algo4_adjlist(price_var, coeff_advars_flat)
+                print(f"  Computing Hessian via edge-pushing (algo4_sparse)...")
+            # Use sparse algo4 - optimized for PDE graphs (60x faster)
+            from aad_edge_pushing.edge_pushing.algo4_sparse import algo4_sparse
+            # sort_inputs=True ensures row-major ordering for Bumping2 compatibility
+            hessian = algo4_sparse(price_var, coeff_advars_flat, sort_inputs=True)
         else:
             hessian = np.zeros((n_params, n_params))
 
