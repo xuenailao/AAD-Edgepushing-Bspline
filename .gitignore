@@ -9,6 +9,7 @@
 !.gitignore
 !.claude/
 !DEVLOG.md
+!BENCHMARKS.md
 !aad_edge_pushing/
 
 # Exclude specific directories
