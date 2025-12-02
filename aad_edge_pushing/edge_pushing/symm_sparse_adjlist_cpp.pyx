@@ -7,14 +7,10 @@
 """
 Cython-optimized symmetric sparse matrix with C++ STL containers.
 
-Phase 2 optimization: Replace Python dict/set with C++ unordered_map/set
-Expected speedup: Additional 2-3× over Phase 1 (47s → 15-20s)
-
 Key improvements:
 - std::unordered_map for storage (no Python object overhead)
 - std::unordered_set for adjacency lists
-- nogil support for future parallelization
-- Custom hash function for pair<int,int>
+- Custom int64 key encoding for (i,j) pairs
 """
 
 from libcpp.unordered_map cimport unordered_map
@@ -23,11 +19,13 @@ from libcpp.vector cimport vector
 from libcpp cimport bool as cbool
 from cython.operator cimport dereference as deref, preincrement as inc
 from libc.stdint cimport int64_t
+from libc.math cimport fabs
 import numpy as np
 cimport numpy as np
 
-# Import type aliases from .pxd file
-from symm_sparse_adjlist_cpp cimport MapType, AdjType
+# Type aliases - defined inline
+ctypedef unordered_map[int64_t, double] MapType
+ctypedef unordered_map[int, unordered_set[int]] AdjType
 
 
 cdef class SymmSparseAdjListCpp:
@@ -35,16 +33,13 @@ cdef class SymmSparseAdjListCpp:
     C++-optimized symmetric sparse matrix with adjacency list support.
 
     Uses pure C++ containers for maximum performance:
-    - map: unordered_map<pair<int,int>, double> with custom hash
+    - map: unordered_map<int64_t, double> (key encodes (i,j) pair)
     - adj: unordered_map<int, unordered_set<int>>
-
-    All critical methods support nogil for parallel execution.
     """
 
-    # Attributes declared in .pxd file
-    # cdef public int n
-    # cdef MapType map
-    # cdef AdjType adj
+    cdef public int n
+    cdef MapType _map
+    cdef AdjType _adj
 
     def __init__(self, int n):
         """
@@ -60,9 +55,6 @@ cdef class SymmSparseAdjListCpp:
         """
         Convert (i,j) to canonical key for upper triangular storage.
         Encodes (min,max) as int64: (min << 32) | max
-
-        Returns:
-            Encoded 64-bit key
         """
         cdef int min_idx, max_idx
         if i <= j:
@@ -76,208 +68,149 @@ cdef class SymmSparseAdjListCpp:
     cpdef void add(self, int i, int j, double val):
         """
         Add value to matrix element at (i,j). Accumulates if entry exists.
-
-        Args:
-            i, j: Matrix indices
-            val: Value to add
         """
-        # All cdef declarations must be at the beginning
         cdef int64_t key
-        cdef MapType.iterator it
-        cdef AdjType.iterator adj_it_i
-        cdef AdjType.iterator adj_it_j
+        cdef double current_val, new_val
 
         if val == 0.0:
             return
 
         key = self._key(i, j)
-        it = self.map.find(key)
 
-        if it != self.map.end():
+        if self._map.count(key) > 0:
             # Entry exists, accumulate
-            # BUG FIX: Must update map explicitly, not through iterator
-            self.map[key] = deref(it).second + val
+            current_val = self._map[key]
+            new_val = current_val + val
 
-            if abs(self.map[key]) < 1e-15:
+            if fabs(new_val) < 1e-15:
                 # Entry cancelled out, remove
-                self.map.erase(it)
-
+                self._map.erase(key)
                 # Update adjacency lists
-                adj_it_i = self.adj.find(i)
-                if adj_it_i != self.adj.end():
-                    deref(adj_it_i).second.erase(j)
-                    if deref(adj_it_i).second.empty():
-                        self.adj.erase(adj_it_i)
-
-                if i != j:
-                    adj_it_j = self.adj.find(j)
-                    if adj_it_j != self.adj.end():
-                        deref(adj_it_j).second.erase(i)
-                        if deref(adj_it_j).second.empty():
-                            self.adj.erase(adj_it_j)
+                if self._adj.count(i) > 0:
+                    self._adj[i].erase(j)
+                    if self._adj[i].empty():
+                        self._adj.erase(i)
+                if i != j and self._adj.count(j) > 0:
+                    self._adj[j].erase(i)
+                    if self._adj[j].empty():
+                        self._adj.erase(j)
+            else:
+                self._map[key] = new_val
         else:
             # New entry
-            self.map[key] = val
-
+            self._map[key] = val
             # Add to adjacency list (both directions since symmetric)
-            self.adj[i].insert(j)
+            self._adj[i].insert(j)
             if i != j:
-                self.adj[j].insert(i)
+                self._adj[j].insert(i)
 
     cpdef double get(self, int i, int j):
         """
         Get matrix element at (i,j). Returns 0 if not stored.
-
-        Args:
-            i, j: Matrix indices
-
-        Returns:
-            Matrix element value
         """
         cdef int64_t key = self._key(i, j)
-        cdef MapType.iterator it = self.map.find(key)
-
-        if it != self.map.end():
-            return deref(it).second
-        else:
-            return 0.0
+        if self._map.count(key) > 0:
+            return self._map[key]
+        return 0.0
 
     cpdef void set_val(self, int i, int j, double val):
         """
         Set matrix element at (i,j) to specific value (overwrites existing).
-
-        Args:
-            i, j: Matrix indices
-            val: Value to set
         """
-        # All cdef declarations at the beginning
-        cdef int64_t key
-        cdef MapType.iterator it
-        cdef AdjType.iterator adj_it_i
-        cdef AdjType.iterator adj_it_j
+        cdef int64_t key = self._key(i, j)
 
-        key = self._key(i, j)
-
-        if val == 0.0 or abs(val) < 1e-15:
+        if val == 0.0 or fabs(val) < 1e-15:
             # Remove entry if exists
-            it = self.map.find(key)
-            if it != self.map.end():
-                self.map.erase(it)
-
+            if self._map.count(key) > 0:
+                self._map.erase(key)
                 # Update adjacency lists
-                adj_it_i = self.adj.find(i)
-                if adj_it_i != self.adj.end():
-                    deref(adj_it_i).second.erase(j)
-                    if deref(adj_it_i).second.empty():
-                        self.adj.erase(adj_it_i)
-
-                if i != j:
-                    adj_it_j = self.adj.find(j)
-                    if adj_it_j != self.adj.end():
-                        deref(adj_it_j).second.erase(i)
-                        if deref(adj_it_j).second.empty():
-                            self.adj.erase(adj_it_j)
+                if self._adj.count(i) > 0:
+                    self._adj[i].erase(j)
+                    if self._adj[i].empty():
+                        self._adj.erase(i)
+                if i != j and self._adj.count(j) > 0:
+                    self._adj[j].erase(i)
+                    if self._adj[j].empty():
+                        self._adj.erase(j)
         else:
             # Set entry
-            self.map[key] = val
-            self.adj[i].insert(j)
+            self._map[key] = val
+            self._adj[i].insert(j)
             if i != j:
-                self.adj[j].insert(i)
+                self._adj[j].insert(i)
 
     cpdef list get_neighbors(self, int i):
         """
         Get all neighbors of node i (i.e., all j where W(i,j) ≠ 0).
-
         KEY OPTIMIZATION: This is O(degree(i)) instead of O(n)!
-
-        Args:
-            i: Node index
-
-        Returns:
-            List of (j, W(i,j)) pairs for all non-zero W(i,j)
         """
-        # All cdef declarations at the beginning
         cdef list neighbors = []
-        cdef AdjType.iterator adj_it
-        cdef unordered_set[int].iterator it
         cdef int j
         cdef double val
+        cdef vector[int] neighbor_vec
+        cdef unordered_set[int].iterator it
 
-        adj_it = self.adj.find(i)
-        if adj_it == self.adj.end():
+        if self._adj.count(i) == 0:
             return neighbors
 
-        it = deref(adj_it).second.begin()
-        while it != deref(adj_it).second.end():
-            j = deref(it)
+        # Copy to vector first
+        it = self._adj[i].begin()
+        while it != self._adj[i].end():
+            neighbor_vec.push_back(deref(it))
+            inc(it)
+
+        # Build result list
+        for j in neighbor_vec:
             val = self.get(i, j)
             if val != 0.0:
                 neighbors.append((j, val))
-            inc(it)
 
         return neighbors
 
     cpdef void clear_row_col(self, int idx):
         """
         Clear row and column idx from the matrix.
-
-        This is needed in Algorithm 4 after processing a node.
         OPTIMIZED: Uses adjacency list to find entries to remove.
-
-        Args:
-            idx: Row/column index to clear
         """
-        # All cdef declarations at the beginning
-        cdef AdjType.iterator adj_it
         cdef vector[int] neighbors_to_clear
-        cdef unordered_set[int].iterator it
         cdef int j
         cdef int64_t key
-        cdef MapType.iterator map_it
-        cdef AdjType.iterator adj_it_j
+        cdef unordered_set[int].iterator it
 
-        adj_it = self.adj.find(idx)
-        if adj_it == self.adj.end():
+        if self._adj.count(idx) == 0:
             return  # No entries involving idx
 
         # Get all neighbors of idx
-        it = deref(adj_it).second.begin()
-        while it != deref(adj_it).second.end():
+        it = self._adj[idx].begin()
+        while it != self._adj[idx].end():
             neighbors_to_clear.push_back(deref(it))
             inc(it)
 
         # Remove all entries (idx, j) and update adjacency
         for j in neighbors_to_clear:
             key = self._key(idx, j)
-            map_it = self.map.find(key)
-            if map_it != self.map.end():
-                self.map.erase(map_it)
+            self._map.erase(key)
 
             # Remove from neighbor's adjacency list
-            adj_it_j = self.adj.find(j)
-            if adj_it_j != self.adj.end():
-                deref(adj_it_j).second.erase(idx)
-                if deref(adj_it_j).second.empty():
-                    self.adj.erase(adj_it_j)
+            if self._adj.count(j) > 0:
+                self._adj[j].erase(idx)
+                if self._adj[j].empty():
+                    self._adj.erase(j)
 
         # Remove idx from adjacency list
-        self.adj.erase(idx)
+        self._adj.erase(idx)
 
     cpdef int nnz(self):
         """
         Return number of non-zero entries (counting symmetric pairs).
-
-        Returns:
-            Number of non-zero elements in full symmetric matrix
         """
-        # All cdef declarations at the beginning
         cdef int count = 0
-        cdef MapType.iterator it
         cdef int64_t key
         cdef int i, j
+        cdef MapType.iterator it
 
-        it = self.map.begin()
-        while it != self.map.end():
+        it = self._map.begin()
+        while it != self._map.end():
             key = deref(it).first
             # Decode key: i = key >> 32, j = key & 0xFFFFFFFF
             i = <int>(key >> 32)
@@ -291,32 +224,21 @@ cdef class SymmSparseAdjListCpp:
         return count
 
     cpdef double sparsity(self):
-        """
-        Return sparsity as percentage.
-
-        Returns:
-            Sparsity percentage (0-100)
-        """
+        """Return sparsity as percentage."""
         return 100.0 * (1.0 - <double>self.nnz() / <double>(self.n * self.n))
 
     def to_dense(self):
-        """
-        Convert to dense numpy array (for testing/debugging).
-
-        Returns:
-            Dense n x n symmetric numpy array
-        """
-        # All cdef declarations at the beginning
+        """Convert to dense numpy array (for testing/debugging)."""
         cdef np.ndarray[np.float64_t, ndim=2] dense
-        cdef MapType.iterator it
         cdef int64_t key
         cdef double val
         cdef int i, j
+        cdef MapType.iterator it
 
         dense = np.zeros((self.n, self.n), dtype=np.float64)
-        it = self.map.begin()
+        it = self._map.begin()
 
-        while it != self.map.end():
+        while it != self._map.end():
             key = deref(it).first
             val = deref(it).second
             # Decode key
@@ -332,21 +254,14 @@ cdef class SymmSparseAdjListCpp:
         return dense
 
     def items(self):
-        """
-        Iterator over non-zero entries as ((i,j), value) tuples.
-        Only returns upper triangular entries.
-
-        Yields:
-            Tuples of ((i, j), value)
-        """
-        # All cdef declarations at the beginning
-        cdef MapType.iterator it
+        """Iterator over non-zero entries as ((i,j), value) tuples."""
         cdef int64_t key
         cdef double val
         cdef int i, j
+        cdef MapType.iterator it
 
-        it = self.map.begin()
-        while it != self.map.end():
+        it = self._map.begin()
+        while it != self._map.end():
             key = deref(it).first
             val = deref(it).second
             # Decode key
@@ -357,56 +272,35 @@ cdef class SymmSparseAdjListCpp:
 
     cpdef void clear(self):
         """Clear all entries from the matrix."""
-        self.map.clear()
-        self.adj.clear()
+        self._map.clear()
+        self._adj.clear()
 
     # ========================================================================
-    # nogil versions for OpenMP parallelization (OpenMP v3)
+    # nogil versions for OpenMP parallelization
     # ========================================================================
 
     cdef void add_nogil(self, int i, int j, double val) nogil:
         """
-        Add value to matrix element (i,j) - nogil version for OpenMP.
-
-        This version supports nogil for true parallelization with OpenMP.
-        Note: NOT thread-safe! Caller must use synchronization (critical section).
-
-        Args:
-            i, j: Matrix indices
-            val: Value to add
+        Add value to matrix element (i,j) - nogil version.
+        Note: NOT thread-safe! Caller must use synchronization.
         """
         cdef int64_t key
-        cdef MapType.iterator it
+        cdef double current_val
 
         if val == 0.0:
             return
 
         key = self._key(i, j)
-        it = self.map.find(key)
 
-        if it != self.map.end():
-            # Entry exists, accumulate
-            self.map[key] = deref(it).second + val
+        if self._map.count(key) > 0:
+            current_val = self._map[key]
+            self._map[key] = current_val + val
         else:
-            # New entry
-            self.map[key] = val
-            # Note: adjacency list updates removed for nogil compatibility
-            # Caller should use get_neighbors() separately if needed
+            self._map[key] = val
 
     cdef double get_nogil(self, int i, int j) nogil:
-        """
-        Get matrix element at (i,j) - nogil version for OpenMP.
-
-        Args:
-            i, j: Matrix indices
-
-        Returns:
-            Matrix element value (0.0 if not stored)
-        """
+        """Get matrix element at (i,j) - nogil version."""
         cdef int64_t key = self._key(i, j)
-        cdef MapType.iterator it = self.map.find(key)
-
-        if it != self.map.end():
-            return deref(it).second
-        else:
-            return 0.0
+        if self._map.count(key) > 0:
+            return self._map[key]
+        return 0.0
