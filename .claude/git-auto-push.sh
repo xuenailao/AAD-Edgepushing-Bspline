@@ -5,7 +5,8 @@
 
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 使用 git 找到项目根目录（更可靠）
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "/projects/illinois/eng/ise/mdmurph/AAD")"
 cd "$PROJECT_ROOT"
 
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")

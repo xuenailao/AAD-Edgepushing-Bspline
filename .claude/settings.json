@@ -2,11 +2,14 @@
   "hooks": {
     "Stop": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
             "command": "bash ./.claude/git-auto-push.sh"
+          },
+          {
+            "type": "prompt",
+            "prompt": "Session 结束。如果本次有代码改动，请提醒用户使用 /log 命令记录本次改进内容、测试效果和下一步计划。"
           }
         ]
       }
