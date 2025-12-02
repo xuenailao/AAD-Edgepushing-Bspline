@@ -86,7 +86,34 @@ class SparseWMatrix:
             del self._neighbors[i]
 
 
-def algo4_sparse(output, inputs: List) -> np.ndarray:
+def sort_inputs_rowmajor(inputs: List) -> List:
+    """
+    Sort inputs to row-major order based on coefficient names.
+
+    Assumes inputs have names like 'w0,3' (coefficient at row 0, col 3).
+    Returns inputs sorted by (row, col) indices.
+
+    This ensures Hessian ordering matches Bumping2's row-major iteration.
+
+    Args:
+        inputs: List of input ADVars with names like 'w0,3', 'w1,2', etc.
+
+    Returns:
+        Sorted list of input ADVars in row-major order.
+    """
+    def parse_name(name):
+        # 'w0,3' -> (0, 3)
+        if name and name.startswith('w') and ',' in name:
+            parts = name[1:].split(',')
+            return int(parts[0]), int(parts[1])
+        return (float('inf'), float('inf'))  # Unknown names sort last
+
+    inputs_with_idx = [(inp, parse_name(getattr(inp, 'name', ''))) for inp in inputs]
+    inputs_sorted = sorted(inputs_with_idx, key=lambda x: (x[1][0], x[1][1]))
+    return [inp for inp, _ in inputs_sorted]
+
+
+def algo4_sparse(output, inputs: List, sort_inputs: bool = False) -> np.ndarray:
     """
     Sparse Edge-Pushing Algorithm 4.
 
@@ -96,11 +123,17 @@ def algo4_sparse(output, inputs: List) -> np.ndarray:
     Args:
         output: Output ADVar (scalar function output)
         inputs: List of input ADVars
+        sort_inputs: If True, sort inputs to row-major order before computing.
+                     Use this when comparing with Bumping2 which iterates row-major.
 
     Returns:
         Dense Hessian matrix of shape (n_inputs, n_inputs)
     """
     from ..aad.core.tape import global_tape
+
+    # Optionally sort inputs to row-major order
+    if sort_inputs:
+        inputs = sort_inputs_rowmajor(inputs)
 
     # Create index mapping
     mapping = _create_index_mapping(global_tape, inputs, output)
