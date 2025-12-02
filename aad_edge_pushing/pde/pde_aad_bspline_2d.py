@@ -588,8 +588,13 @@ class BS_PDE_AAD_BSpline2D:
         if compute_hessian:
             if verbose:
                 print(f"  Computing Hessian via edge-pushing (algo4)...")
-            from aad_edge_pushing.edge_pushing.algo4_cython_simple import algo4_cython_simple
-            hessian = algo4_cython_simple(price_var, coeff_advars_flat)
+            # Try Cython first, fallback to Pure Python
+            try:
+                from aad_edge_pushing.edge_pushing.algo4_cython_simple import algo4_cython_simple
+                hessian = algo4_cython_simple(price_var, coeff_advars_flat)
+            except ImportError:
+                from aad_edge_pushing.edge_pushing.algo4_adjlist import algo4_adjlist
+                hessian = algo4_adjlist(price_var, coeff_advars_flat)
         else:
             hessian = np.zeros((n_params, n_params))
 
