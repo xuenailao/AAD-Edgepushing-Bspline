@@ -7,7 +7,7 @@
 
 ## 2025-12-03 04:00
 
-**提交状态**: ⏳ 未提交
+**提交状态**: ✅ 已提交 (commit: 30487e2)
 
 ### 改进内容
 - 将 Taylor 代码从 `jpm_practicum` 提取到 `aad_edge_pushing/aad/taylor.py`
