@@ -1,7 +1,7 @@
 # aad/ops/transcendental.py
 import numpy as np
 from ..core.var import ADVar
-from ..core.tape import global_tape
+from ..core import tape as tape_mod  # Use module access for use_tape() compatibility
 from .arithmetic import _as_ad
 
 def exp(x):
@@ -9,14 +9,14 @@ def exp(x):
     ex = np.exp(x.val)
     out = ADVar(ex)
     out.dot = ex * x.dot
-    global_tape.push_node(op_tag="exp", out=out, parents=[(x, ex)])
+    tape_mod.global_tape.push_node(op_tag="exp", out=out, parents=[(x, ex)])
     return out
 
 def log(x):
     x = _as_ad(x, requires_grad=False)
     out = ADVar(np.log(x.val))
     out.dot = (1.0 / x.val) * x.dot
-    global_tape.push_node(op_tag="log", out=out, parents=[(x, 1.0/x.val)])
+    tape_mod.global_tape.push_node(op_tag="log", out=out, parents=[(x, 1.0/x.val)])
     return out
 
 def sqrt(x):
@@ -24,7 +24,7 @@ def sqrt(x):
     s = np.sqrt(x.val)
     out = ADVar(s)
     out.dot = (0.5 / s) * x.dot
-    global_tape.push_node(op_tag="sqrt", out=out, parents=[(x, 0.5/s)])
+    tape_mod.global_tape.push_node(op_tag="sqrt", out=out, parents=[(x, 0.5/s)])
     return out
 
 def erf(x):
@@ -43,5 +43,5 @@ def erf(x):
     deriv = (2.0 / np.sqrt(np.pi)) * np.exp(-x.val ** 2)
     out.dot = deriv * x.dot
 
-    global_tape.push_node(op_tag="erf", out=out, parents=[(x, deriv)])
+    tape_mod.global_tape.push_node(op_tag="erf", out=out, parents=[(x, deriv)])
     return out

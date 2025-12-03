@@ -1,7 +1,7 @@
 # aad/ops/arithmetic.py
 import numpy as np
 from ..core.var import ADVar
-from ..core.tape import global_tape
+from ..core import tape as tape_mod  # Use module access for use_tape() compatibility
 
 def _as_ad(x, requires_grad=False):
     """Ensure x is an ADVar; otherwise wrap it as a constant ADVar."""
@@ -37,7 +37,7 @@ def _binary(x, y, f, dfdx, dfdy, tag):
             out.dot = 0.0
     # ------------------------------------------------------
 
-    global_tape.push_node(
+    tape_mod.global_tape.push_node(
         op_tag=tag, out=out,
         parents=[(x, dfdx(x.val, y.val)), (y, dfdy(x.val, y.val))]
     )
@@ -58,7 +58,7 @@ def neg(x):
     x = _as_ad(x, requires_grad=False)
     out = ADVar(-x.val)
     out.dot = -x.dot
-    global_tape.push_node(op_tag="neg", out=out, parents=[(x, -1.0)])
+    tape_mod.global_tape.push_node(op_tag="neg", out=out, parents=[(x, -1.0)])
     return out
 
 def pow(x, y):
@@ -106,7 +106,7 @@ def pow(x, y):
     dfdx = pv * (xv ** (pv - 1.0))
     dfdy = (xv ** pv) * (np.log(xv) if np.all(xv > 0) else 0.0)
 
-    global_tape.push_node(op_tag="pow", out=out, parents=[(x, dfdx), (y, dfdy)])
+    tape_mod.global_tape.push_node(op_tag="pow", out=out, parents=[(x, dfdx), (y, dfdy)])
     return out
 
 # Bind Python operators to ADVar

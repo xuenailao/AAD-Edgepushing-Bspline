@@ -384,7 +384,13 @@ def edge_push_hessian(
                             for s in range(r + 1, m):
                                 p_s, a_s = parents[s]
                                 new_key = frozenset({id(p_r), id(p_s)})
-                                W_var_pairs[new_key] += w * a_r * a_s
+                                # When both parents point to the SAME variable (e.g., x*x),
+                                # the cross term contributes to the singleton and needs
+                                # factor 2 from the binomial expansion (a₀+a₁)² = a₀²+2a₀a₁+a₁²
+                                if id(p_r) == id(p_s):
+                                    W_var_pairs[new_key] += 2.0 * w * a_r * a_s
+                                else:
+                                    W_var_pairs[new_key] += w * a_r * a_s
                         # Diagonal (r == s): contributes to singleton {p_r}
                         for r in range(m):
                             p_r, a_r = parents[r]
