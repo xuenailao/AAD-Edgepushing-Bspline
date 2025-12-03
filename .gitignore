@@ -9,9 +9,6 @@
 !.gitignore
 !.claude/
 !DEVLOG.md
-!BENCHMARKS.md
-!compile_cython.sh
-!test_*.py
 !aad_edge_pushing/
 
 # Exclude specific directories
