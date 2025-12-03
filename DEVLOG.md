@@ -5,6 +5,78 @@
 
 ---
 
+## 2025-12-03 05:30
+
+**提交状态**: ⏳ 未提交
+
+### 改进内容
+- 实现真实期权数据的波动率曲面校准
+- 验证 EP Hessian 在金融应用中的正确性
+- 比较不同 B-spline 网格配置的拟合效果
+- 编译 Cython EP 模块 (algo4_cython_simple, symm_sparse_adjlist_cpp)
+- 完成 PDE+B-spline V(w) 的 Hessian 计算
+
+### 波动率曲面校准
+
+#### 数据
+- SPY 期权数据: `UnderlyingOptionsEODQuotes_2025-02-06.csv`
+- 标的价格: $6081.76
+- 有效期权数: 5,405
+
+#### EP Hessian 验证
+- EP vs 数值 Hessian 误差: **10⁻⁸ ~ 10⁻¹⁴**
+- 测试配置: 20 参数 (5×4), 100 数据点
+- 结构完全匹配，验证 EP 在真实金融问题上正确
+
+#### B-spline 网格配置比较
+
+| 配置 | 参数数 | 总 RMSE | 短期 RMSE |
+|------|--------|---------|-----------|
+| Uniform (5×4) | 42 | 0.0156 | 0.0164 |
+| **Dense Short-T (5×6)** | 56 | **0.0148** | **0.0150** |
+| Dense M + Short-T (7×6) | 72 | 0.0149 | 0.0152 |
+| Weighted Short-T (5×4) | 42 | 0.0153 | 0.0158 |
+
+#### 关键发现
+- Dense Short-T 配置最优，短期 RMSE 降低 8.5%
+- 增加 moneyness 节点无显著改善
+- 加权方法效果有限，问题根源是节点分布
+
+#### PDE+B-spline Hessian 计算
+
+| 指标 | 值 |
+|------|-----|
+| 期权价格 (PDE) | 10.4501 |
+| BS 解析价格 | 10.4506 |
+| 价格误差 | 0.0005 |
+| Hessian 维度 | 10×10 |
+| 计算时间 (Cython) | 84.6s |
+| 稀疏性 | 36% |
+| 条件数 | 1.25 |
+
+### 生成的文件
+- `calibrate_vol_surface_fast.py` - 快速校准脚本
+- `calibrate_vol_surface_ep.py` - EP Hessian 验证脚本
+- `calibrate_vol_surface_improved.py` - 网格配置比较脚本
+- `compute_pde_hessian.py` - PDE Hessian 计算脚本
+- `vol_surface.png`, `vol_smiles.png` - 波动率曲面可视化
+- `hessian_comparison.png` - EP vs 数值 Hessian 比较
+- `vol_smiles_comparison.png`, `rmse_comparison.png` - 配置比较
+- `pde_hessian.png` - PDE Hessian 可视化
+
+### Insights
+- **EP 在真实金融问题上的精度**: EP vs 数值 Hessian 误差达到 10⁻⁸ ~ 10⁻¹⁴，远超金融应用需求
+- **B-spline 节点分布的重要性**: 短期期权波动率曲率更陡，需要更密的时间节点来捕捉，加权方法无法替代合理的节点分布
+- **PDE Hessian 的稀疏结构**: B-spline 紧支撑特性导致 36% 稀疏性，中心区域（ATM）对波动率最敏感
+- **Hessian 不定性**: 期权价格对波动率的二阶导数可正可负，反映了期权价值函数的凸性变化
+
+### 下一步计划
+1. ~~EP vs Taylor vs Bumping2 性能基准测试~~ (已完成基础测试)
+2. ~~Newton-Raphson 二阶优化~~ (跳过)
+3. ~~PDE+B-spline V(w) 的 Hessian 计算~~ (已完成)
+
+---
+
 ## 2025-12-03 04:00
 
 **提交状态**: ✅ 已提交 (commit: 30487e2)
