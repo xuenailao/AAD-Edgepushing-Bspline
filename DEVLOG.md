@@ -5,6 +5,53 @@
 
 ---
 
+## 2025-12-02 22:15
+
+### 后续工作计划
+
+#### 当前状态 ✅
+
+性能优化已完成：
+- 稀疏优化：60x
+- Cython优化：+3x = 190x total
+- 大规模验证：up to **1248x** at 225 params
+- EP现在比Bumping2对角线都快（5.5x）
+
+#### 近期任务（1-2周）
+
+**优先级1：真实期权数据应用** ⭐⭐⭐
+- 数据：`UnderlyingOptionsEODQuotes_2025-02-06`
+- 目标：用EP加速B-spline volatility surface校准
+- 任务：加载数据 → 设置校准目标 → EP计算Hessian → Newton优化 → 验证曲面质量
+
+**优先级2：Taylor Expansion对比** ⭐⭐
+- 代码：https://github.com/xuenailao/JPM-Practicum-AAD
+- 目标：对比EP vs Taylor expansion在B-spline模型上的表现
+- 关键：精度、速度、内存对比，确定最优使用场景
+
+**优先级3：技术报告** ⭐⭐
+- 文档化优化历程（60x → 190x → 1248x）
+- 实际应用案例
+- 方法对比和建议
+
+#### 中长期计划
+
+**1-3月**：
+- 更复杂PDE模型（Heston, Jump-diffusion, Multi-asset）
+- 生产系统开发（API, 缓存, 监控）
+
+**3-6月**：
+- 学术发表（Journal of Computational Finance）
+- 开源包发布（`aad-edge-pushing`）
+
+#### 推荐行动
+
+Week 1-2：真实数据应用
+Week 3-4：Taylor对比
+Week 5-6：技术报告
+
+---
+
 ## 2025-12-02 22:00
 
 ### 大规模验证完成 - 1248x极限加速！
