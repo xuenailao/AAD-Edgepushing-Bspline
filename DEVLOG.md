@@ -5,6 +5,76 @@
 
 ---
 
+## 2025-12-03 00:28
+
+**提交状态**: ⏳ 未提交
+
+### 改进内容
+- 项目文件结构整理与重组
+- 移动3个校准脚本到 `aad_edge_pushing/pde/calibration/`
+  - `calibrate_vol_surface_fast.py` → `calibrate_fast.py`
+  - `calibrate_vol_surface_ep.py` → `calibrate_with_ep.py`
+  - `calibrate_vol_surface_improved.py` → `calibrate_comparison.py`
+- 归档12个实验性Cython文件到 `edge_pushing/archive/experimental/`
+  - 6个OpenMP变体 (algo4_openmp*.pyx)
+  - 6个其他实验性变体
+- 删除25个文件：
+  - TIER 1: 6个完全未引用文件 (algo3_block.py, algo4_adjmatrix.py, algo4_batch_parallel.py, symm_sparse_adjlist_original.py, setup_algo4_cython.py, setup_cpp_fixed.py)
+  - TIER 3: 7个孤立设置脚本 (setup_algo4_openmp.py, setup_openmp_v3.py, setup_cython_cpp.py, setup_batch_parallel.py, setup_sparse_openmp.py, setup_v2.py, setup_cython.py)
+  - TIER 2: 12个已归档文件
+- 更新 `edge_pushing/__init__.py` 移除已删除模块的导出
+- 创建3个新setup脚本并成功编译Cython模块
+  - setup_algo4_simple.py → algo4_cython_simple.so (802KB)
+  - setup_symm_sparse.py → symm_sparse_adjlist.so (701KB)
+  - setup_symm_sparse_cpp.py → symm_sparse_adjlist_cpp.so (1.4MB)
+
+### 测试效果
+- `compute_pde_hessian.py` 运行成功，验证无破坏性改动
+  - Option Price: 10.450115 (BS 10.450584, 误差 0.000469)
+  - Hessian: 10×10, 36% sparse, 条件数 1.25
+  - 计算时间: 84.77s
+- edge_pushing/ 目录从 ~45个文件减少到 ~20个核心文件 (**减少 56%**)
+- 成功编译3个Cython模块，总大小 2.9MB
+- 项目结构更清晰：校准功能集中在 pde/calibration/, 核心代码在 edge_pushing/, 实验性代码归档
+
+### 文件结构更新
+
+```
+aad_edge_pushing/
+├── aad/                          # 核心AAD库
+│   ├── core/                     # AD核心引擎
+│   ├── ops/                      # AD操作符
+│   └── taylor.py                 # Taylor 2阶前向模式
+├── edge_pushing/                 # EP算法实现 (56%↓)
+│   ├── algo4_cython_simple.pyx  # 主要Cython实现 ⭐
+│   ├── symm_sparse_adjlist.pyx  # 稀疏邻接表 ⭐
+│   ├── symm_sparse_adjlist_cpp.pyx  # C++优化版 ⭐
+│   ├── setup_*.py               # 新增3个setup脚本 ✨
+│   └── archive/experimental/    # 12个实验性文件归档 📦
+└── pde/                          # PDE应用
+    ├── calibration/              # 校准模块 (新增3个) ✨
+    │   ├── calibrate_fast.py    # 移入 ←
+    │   ├── calibrate_with_ep.py # 移入 ←
+    │   └── calibrate_comparison.py # 移入 ←
+    ├── methods/                  # 各种方法实现
+    └── models/                   # 波动率模型 (✅保留)
+```
+
+### Insights
+- **项目结构组织原则**: calibration是PDE应用的核心功能而非仅仅演示脚本，应该模块化放入 pde/calibration/ 与现有的 bspline_calibrator.py 一起，形成完整的校准模块
+- **依赖分析的重要性**: 使用 `grep -r "from.*import"` 分析导入关系避免误删，发现 models/ 目录被 5+ 个文件导入（之前以为未使用）
+- **分层清理策略**: TIER 1（0引用）立即删除、TIER 2（实验性但有参考价值）归档保留、TIER 3（孤立配置文件）删除。既保持整洁又不丢失历史
+- **Cython编译陷阱**: .pyx文件编译时如果同时包含生成的 .cpp 文件会导致 "multiple definition" 链接错误，setup.py 的 sources 应只包含 .pyx 文件
+- **import路径更新**: 文件移动后需要更新 sys.path.insert() 从相对于根目录改为相对于新位置 (parent.parent.parent...)
+
+### 下一步计划
+- 提交文件结构整理的改动到 git
+- 考虑添加项目结构文档 (ARCHITECTURE.md) 说明三层架构
+- 完成 EP vs Taylor vs Bumping2 的完整性能基准测试
+- 可能的大规模应用测试（更大参数规模的PDE Hessian计算）
+
+---
+
 ## 2025-12-03 05:30
 
 **提交状态**: ⏳ 未提交
