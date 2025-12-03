@@ -1,7 +1,7 @@
 # aad/ops/special.py
 import numpy as np
 from ..core.var import ADVar
-from ..core.tape import global_tape
+from ..core import tape as tape_mod  # Use module access for use_tape() compatibility
 from .arithmetic import _as_ad
 
 SQRT_TWO_PI = np.sqrt(2.0 * np.pi)
@@ -26,5 +26,5 @@ def norm_cdf(x):
     out = ADVar(val)
     pdf = np.exp(-0.5 * x.val * x.val) / SQRT_TWO_PI
     out.dot = pdf * x.dot
-    global_tape.push_node(op_tag="norm_cdf", out=out, parents=[(x, norm_pdf(x.val))])
+    tape_mod.global_tape.push_node(op_tag="norm_cdf", out=out, parents=[(x, norm_pdf(x.val))])
     return out

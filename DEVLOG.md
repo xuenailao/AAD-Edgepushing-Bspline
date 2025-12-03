@@ -5,6 +5,39 @@
 
 ---
 
+## 2025-12-03 04:00
+
+**提交状态**: ⏳ 未提交
+
+### 改进内容
+- 将 Taylor 代码从 `jpm_practicum` 提取到 `aad_edge_pushing/aad/taylor.py`
+- 修复 `aad_edge_pushing` 的 EP bug：
+  - `use_tape()` 兼容性问题（arithmetic.py, transcendental.py, special.py, engine.py）
+  - Creating 阶段同变量因子2问题（engine.py 第458-461行）
+
+### 测试效果
+- EP vs Taylor 精度完全匹配（误差 <1e-15）
+- 测试通过函数：
+  - `f(x) = sum(xᵢ²)` → Hessian = 2I ✓
+  - `f(x) = sqrt(1 + Σxᵢ²)` ✓
+  - `f(x) = exp(Σxᵢ²)` ✓
+  - `f(x) = log(1 + Σxᵢ²)` ✓
+  - `f(x) = (Σxᵢ²)²` ✓
+  - `f(x) = x³` via x*x*x ✓
+
+### Insights
+- **Bug 根因**：`x*x` 的 cross term `{("cross", (0,1)): 1.0}` 两个 parent 都是同一个 x
+- `frozenset({id(x), id(x)})` 坍缩为 singleton `frozenset({id(x)})`
+- 需要 factor 2 补偿：`(a+a)² = 2a²`
+- **重要**：Pushing 阶段和 Creating 阶段**都需要**处理同变量情况
+
+### 下一步计划
+1. 分析 Taylor, EP, Bumping2 在 PDE+B-spline 运行速度差异的原因
+2. 使用真实数据 `UnderlyingOptionsEODQuotes_2025-02-06` 进行 calibration
+3. 绘制波动率曲面和实际 Hessian 图
+
+---
+
 ## 2025-12-03 02:30
 
 ### B-spline PDE模型验证

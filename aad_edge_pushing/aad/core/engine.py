@@ -2,7 +2,7 @@
 from __future__ import annotations
 import numpy as np
 from typing import Sequence, Union
-from .tape import global_tape
+from . import tape as tape_mod  # Use module access for use_tape() compatibility
 from .var import ADVar
 
 def zero_adjoints():
@@ -12,7 +12,7 @@ def zero_adjoints():
     and zero their `.adj` fields.
     """
     seen = set()
-    for node in global_tape.nodes:
+    for node in tape_mod.global_tape.nodes:
         if id(node.out) not in seen:
             _zero(node.out); seen.add(id(node.out))
         for p, _ in node.parents:
@@ -47,7 +47,7 @@ def reverse(outputs: Union[ADVar, Sequence[ADVar]], seed=1.0):
         _seed(outputs, seed)
 
     # Backward sweep
-    for node in reversed(global_tape.nodes):
+    for node in reversed(tape_mod.global_tape.nodes):
         y = node.out
         if _is_zero(y.adj):
             continue  # nothing to propagate
@@ -82,7 +82,7 @@ def zero_tangents():
     stale tangent information leaks into the next pass.
     """
     seen = set()
-    for node in global_tape.nodes:
+    for node in tape_mod.global_tape.nodes:
         if id(node.out) not in seen:
             _zero_dot(node.out); seen.add(id(node.out))
         for p, _ in node.parents:
@@ -146,7 +146,7 @@ def hvp_for(f, inputs: dict, v: dict):
     _seed(y, 1.0)  # y.adj += 1.0 ; y.adj_dot remains 0 by default
 
     # Reverse sweep: propagate (bar, bar_dot)
-    for node in reversed(global_tape.nodes):
+    for node in reversed(tape_mod.global_tape.nodes):
         yv = node.out
         if _is_zero(yv.adj) and _is_zero(yv.adj_dot):
             continue
@@ -169,7 +169,7 @@ def _zero_adj_dot_only():
     Leaves v.dot untouched, so the forward JVP seeds remain valid.
     """
     seen = set()
-    for node in global_tape.nodes:
+    for node in tape_mod.global_tape.nodes:
         if id(node.out) not in seen:
             _zero_one_adj_dot(node.out); seen.add(id(node.out))
         for p, _ in node.parents:
@@ -296,7 +296,7 @@ from collections import defaultdict
 import numpy as np
 from typing import Dict, Sequence, Union
 
-from .tape import global_tape, use_tape
+from .tape import use_tape
 from .var import ADVar
 
 # ---------------- Edge‑Pushing: Componentwise (Algorithm 4) ---------------- #
@@ -340,14 +340,14 @@ def edge_push_hessian(
         if not isinstance(y, ADVar):
             y = ADVar(y, requires_grad=False, name="y")
 
-        L = len(global_tape.nodes)
+        L = len(tape_mod.global_tape.nodes)
         if L == 0:
             return {} if sparse else np.zeros((0, 0))
 
         # 2) Indexing maps
         input_order = list(inputs.keys())
         input_col = {id(vars_ad[k]): i for i, k in enumerate(input_order)}  # id(leaf) -> col
-        node_index = {id(nd.out): i for i, nd in enumerate(global_tape.nodes)}  # id(out)->idx
+        node_index = {id(nd.out): i for i, nd in enumerate(tape_mod.global_tape.nodes)}  # id(out)->idx
 
         def is_input_id(aid: int) -> bool:
             # Leaf inputs: appear as a parent but not as any node.out on tape
@@ -362,7 +362,7 @@ def edge_push_hessian(
 
         # ---------- Reverse sweep over the tape ----------
         for i in range(L - 1, -1, -1):
-            node = global_tape.nodes[i]
+            node = tape_mod.global_tape.nodes[i]
             y_ad = node.out
             y_id = id(y_ad)
             parents = node.parents  # [(ADVar, ∂y/∂p), ...]
@@ -452,7 +452,13 @@ def edge_push_hessian(
                             d2 = cross_weight_for_pos(u, v)
                             if d2 is not None:
                                 key = frozenset({parent_ids[u], parent_ids[v]})
-                                W_var_pairs[key] += float(d2 * vb)
+                                # When both parents point to the SAME variable (e.g., x*x),
+                                # the cross term contributes to the diagonal with factor 2
+                                # from the binomial expansion: (a+a)² = 2a² requires factor 2
+                                if parent_ids[u] == parent_ids[v]:
+                                    W_var_pairs[key] += float(2.0 * d2 * vb)
+                                else:
+                                    W_var_pairs[key] += float(d2 * vb)
 
             # ===== (3) Adjoint =====
             if vbar[i] != 0.0:
@@ -517,8 +523,8 @@ def edge_push_pattern(f, inputs: dict):
         topo = _topo_indexing()
         node_idx_of_advar, input_col = topo["node_idx_of_advar"], topo["input_col"]
         pat = set()
-        for i in range(len(global_tape.nodes) - 1, -1, -1):
-            node = global_tape.nodes[i]
+        for i in range(len(tape_mod.global_tape.nodes) - 1, -1, -1):
+            node = tape_mod.global_tape.nodes[i]
             parents = node.parents
             # unordered parent pairs
             m = len(parents)
@@ -543,12 +549,12 @@ def _topo_indexing():
       - input_col: { id(ADVar) -> input column index }  (leaf ADVars constructed from user inputs)
     """
     node_idx_of_advar = {}
-    for idx, nd in enumerate(global_tape.nodes):
+    for idx, nd in enumerate(tape_mod.global_tape.nodes):
         node_idx_of_advar[id(nd.out)] = idx
     # inputs are ADVars that never appear as .out of any node but are used as parents; we recognize them
     input_advars = []
     seen_out = set(node_idx_of_advar.keys())
-    for nd in global_tape.nodes:
+    for nd in tape_mod.global_tape.nodes:
         for (p, _) in nd.parents:
             if id(p) not in seen_out and p.requires_grad:
                 input_advars.append(p)
@@ -556,13 +562,13 @@ def _topo_indexing():
     # final column order = order of user dict keys; build a map {id(ADVar)->col}
     input_col = {}
     col = 0
-    for nd in global_tape.nodes:
+    for nd in tape_mod.global_tape.nodes:
         for (p, _) in nd.parents:
             if p in input_advars and id(p) not in input_col:
                 input_col[id(p)] = col
                 col += 1
     return {
-        "node_ids": list(range(len(global_tape.nodes))),
+        "node_ids": list(range(len(tape_mod.global_tape.nodes))),
         "node_idx_of_advar": node_idx_of_advar,
         "input_col": input_col,
     }
@@ -675,7 +681,7 @@ def edge_push_hessian_debug(f, inputs: dict, focus_pairs=None):
         }
     """
     from .tape import use_tape
-    from .tape import global_tape as _gt
+    from . import tape as _tape_mod
     from .var import ADVar as _AD
 
     with use_tape():
@@ -705,7 +711,7 @@ def edge_push_hessian_debug(f, inputs: dict, focus_pairs=None):
 
         # reverse sweep
         for i in range(L-1, -1, -1):
-            node = _gt.nodes[i]
+            node = _tape_mod.global_tape.nodes[i]
             parents = node.parents
 
             # ---- Creating: project second derivatives to input-input pairs ----
